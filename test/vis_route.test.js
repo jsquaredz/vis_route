@@ -122,7 +122,7 @@ test("locator: unknown addresses resolve to null", async () => {
   for (const ip of ["8.8.8.8", "8.8.4.4", "1.1.1.1"]) assert.equal(await locate(ip), null, ip);
 });
 
-test("locateHops: skips unlocatable hops and collapses repeated places", async () => {
+test("locateHops: skips unlocatable hops and merges repeated places", async () => {
   const places = {
     "81.2.69.142": { lat: 51.5, lon: -0.1, label: "London" },
     "81.2.69.143": { lat: 51.5, lon: -0.1, label: "London" },
@@ -130,14 +130,16 @@ test("locateHops: skips unlocatable hops and collapses repeated places", async (
   };
   const seen = [];
   const result = await VisRoute.locateHops(
-    ["192.168.1.1", "81.2.69.142", "81.2.69.143", "210.152.243.234"],
+    ["192.168.1.1", "100.120.101.128", "81.2.69.142", "81.2.69.143", "9.9.9.9", "210.152.243.234"],
     async (ip) => places[ip] || null,
-    (hop) => seen.push(hop.ip)
+    (hop, hops, isNew) => seen.push([hop.ip, isNew])
   );
-  assert.deepEqual(result.hops.map((hop) => hop.ip), ["81.2.69.142", "210.152.243.234"]);
-  assert.deepEqual(seen, ["81.2.69.142", "210.152.243.234"]);
-  assert.equal(result.total, 4);
-  assert.equal(result.skipped, 1);
+  assert.deepEqual(result.hops.map((hop) => hop.ips), [["81.2.69.142", "81.2.69.143"], ["210.152.243.234"]]);
+  assert.deepEqual(seen, [["81.2.69.142", true], ["81.2.69.142", false], ["210.152.243.234", true]]);
+  assert.equal(result.total, 6);
+  assert.equal(result.private, 2);
+  assert.equal(result.unlocated, 1);
+  assert.equal(result.merged, 1);
 });
 
 test("great circle: endpoints are preserved", () => {
@@ -226,4 +228,15 @@ test("unwrapRing: a ring circling the south pole is closed along the pole", () =
   const { points, wraps } = VisRoute.unwrapRing(ring);
   assert.equal(wraps, true);
   assert.deepEqual(points.slice(-3), [[180, -80], [180, -90], [-180, -90]]);
+});
+
+test("bareTarget: recognises a lone address or hostname", () => {
+  assert.equal(VisRoute.bareTarget("8.8.8.8"), "8.8.8.8");
+  assert.equal(VisRoute.bareTarget("  example.com\n"), "example.com");
+});
+
+test("bareTarget: traceroute output and other text are not a target", () => {
+  for (const text of ["", " 1  8.8.8.8  1 ms", "hello", "two words.com x", "8.8.8.8\n1.1.1.1", "<b>.com"]) {
+    assert.equal(VisRoute.bareTarget(text), null, text);
+  }
 });
